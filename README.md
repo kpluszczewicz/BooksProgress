@@ -1,4 +1,4 @@
-# Scritable Project
+# Scritable Projects
 Here I store my Scriptable project for iOS
 
 ## Book progress
