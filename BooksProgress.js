@@ -49,12 +49,14 @@ class Cache {
 const MESSAGES = {
   "pl": {
     books_list: "Lista aktualnie czytanych książek",
+    read_books_list: "Lista przeczytanych książek",
     action_save: "Zapisz",
     action_cancel: "Anuluj",
     update_page: "Podaj stronę na której skończyłeś"
   },
   "en": {
     books_list: "List of books being read",
+    read_books_list: "List of books already read",
     action_save: "Save",
     action_cancel: "Cancel",
     update_page: "Enter page you have stopped reading on"
@@ -72,7 +74,9 @@ class Book {
   constructor(obj) {
     this.title = obj["title"]
     this.currentPage = obj["currentPage"]
+    this.currentPageInt = parseInt(this.currentPage)
     this.textLength = obj["textLength"]
+    this.textLengthInt = parseInt(this.textLength)
     this.startingDate = new Date(obj.startingDate)
     this.lastReadDate = new Date(obj.lastReadDate)
   }
@@ -82,6 +86,15 @@ class Book {
     let currentPage = this.currentPage
     let textLength = this.textLength
     return `${currentPage}/${textLength}`
+  }
+
+  isRead() {
+    console.log(`compare book ${this.title} with ${this.currentPageInt}/${this.totalePagesNumberInt}`)
+    return this.currentPageInt == this.textLengthInt
+  }
+  isBeingRead() {
+    console.log(`compare book ${this.title} with ${this.currentPageInt}/${this.totalePagesNumberInt}`)
+    return this.currentPageInt < this.textLengthInt
   }
 
   // to save any book to db file you need to save whole array, can't operate on singular books
@@ -112,7 +125,9 @@ if (config.runsInWidget) {
   mainWidget.backgroundColor = new Color("#222222")
   let books = await Book.all()
 
-  books.forEach(book => { drawBookProgress(book, mainWidget) });
+  books.forEach(book => { 
+    if (book.isBeingRead()) drawBookProgress(book, mainWidget) 
+  });
 
   Script.setWidget(mainWidget)
   mainWidget.presentMedium()
@@ -124,8 +139,10 @@ if (config.runsInWidget) {
 
   // musi być await
   let books = await Book.all()
+  let booksBeingRead = books.filter((book) => book.isBeingRead())
+  let readBooks = books.filter((book) => book.isRead())
 
-  for (book of books) {
+  for (book of booksBeingRead) {
     let row = new UITableRow()
     let titleCell = row.addText(book.title)
     let pagesCell = row.addText(book.printPageStatus())
@@ -137,6 +154,30 @@ if (config.runsInWidget) {
       let previousCurrentPage = b.currentPage
        editBook(b, books)
     }
+    uiBooksTable.addRow(row)
+  }
+
+  let readBooksRow = new UITableRow()
+  let readBooksCell = readBooksRow.addText(localeMessages.read_books_list)
+  readBooksRow.height = 60
+  readBooksRow.backgroundColor = Color.yellow()
+  readBooksCell.titleFont = Font.boldSystemFont(20)
+  readBooksCell.titleColor = Color.white()
+  readBooksCell.subtitleColor = Color.white()
+  uiBooksTable.addRow(readBooksRow)
+
+  for (book of readBooks) {
+    let row = new UITableRow()
+    let titleCell = row.addText(book.title)
+    // let pagesCell = row.addText(book.printPageStatus())
+    // titleCell.widthWeight = 80
+    // pagesCell.widthWeight = 20
+    // row.dismissOnSelect = true
+    // row.onSelect = (idx) => {
+    //   let b = books[idx - 1]
+    //   let previousCurrentPage = b.currentPage
+    //    editBook(b, books)
+    // }
     uiBooksTable.addRow(row)
   }
 
@@ -174,7 +215,7 @@ function initBooksTable() {
   //logo.font = Font.heavySystemFont(14)
   let headerRow = new UITableRow()
   let headerCell = headerRow.addText(localeMessages.books_list)
-  headerRow.height = 80
+  headerRow.height = 60
   headerRow.backgroundColor = Color.yellow()
   headerCell.titleFont = Font.boldSystemFont(20)
   headerCell.titleColor = Color.white()
