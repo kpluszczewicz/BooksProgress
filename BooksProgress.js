@@ -50,14 +50,23 @@ const MESSAGES = {
   "pl": {
     books_list: "Lista aktualnie czytanych książek",
     read_books_list: "Lista przeczytanych książek",
+    books_put_aisde_list: "Przerwane czytanie",
     action_save: "Zapisz",
+    action_yes: "Tak",
+    action_put_aside: "Przerwij czytanie książki",
+    action_continue_reading: "Wznowić czytanie?",
+
     action_cancel: "Anuluj",
     update_page: "Podaj stronę na której skończyłeś"
   },
   "en": {
     books_list: "List of books being read",
     read_books_list: "List of books already read",
+    books_put_aisde_list: "Books put aside",
     action_save: "Save",
+    action_yes: "Yes",
+    action_put_aside: "Put book aside",
+    action_continue_reading: "Continue reading?",
     action_cancel: "Cancel",
     update_page: "Enter page you have stopped reading on"
   }
@@ -66,7 +75,10 @@ const MESSAGES = {
 const BOOKS_CACHE_DIRECTORY = "BooksProgress"
 const BOOKS_CACHE_DATABASE_FILENAME = "books_progress_db.json"
 const BOOKS_CACHE = new Cache(BOOKS_CACHE_DIRECTORY)
+
 const widget = { config: { width: 320, height: 10 }}
+if (config.widgetFamily == "small") widget.config.width = 140
+
 const localeMessages = (Device.locale() == "en_PL" ? MESSAGES["pl"] : MESSAGES["en"])
 
 // Representation of particular book
@@ -77,8 +89,9 @@ class Book {
     this.currentPageInt = parseInt(this.currentPage)
     this.textLength = obj["textLength"]
     this.textLengthInt = parseInt(this.textLength)
-    this.startingDate = new Date(obj.startingDate)
-    this.lastReadDate = new Date(obj.lastReadDate)
+    this.startingDate = new Date(obj["startingDate"])
+    this.lastReadDate = new Date(obj["lastReadDate"])
+    this.putAside = obj["putAside"]
   }
 
   // prints status of a book in form ie 13/233 where 13 is current page and 233 is total number of pages
@@ -88,13 +101,12 @@ class Book {
     return `${currentPage}/${textLength}`
   }
 
+  isPutAside() { return this.putAside == true }
   isRead() {
-    console.log(`compare book ${this.title} with ${this.currentPageInt}/${this.totalePagesNumberInt}`)
-    return this.currentPageInt == this.textLengthInt
+    return !this.isPutAside() && this.currentPageInt == this.textLengthInt
   }
   isBeingRead() {
-    console.log(`compare book ${this.title} with ${this.currentPageInt}/${this.totalePagesNumberInt}`)
-    return this.currentPageInt < this.textLengthInt
+    return !this.isPutAside() && this.currentPageInt < this.textLengthInt
   }
 
   // to save any book to db file you need to save whole array, can't operate on singular books
@@ -119,95 +131,143 @@ class Book {
   }
 }
 
+const BOOKS = await Book.all()
+
+class ShelfView {
+  constructor(wall, config) {
+    this.wall = wall
+    this.title = config.title
+    this.onTap = config.onTap
+    this.books = config.books
+  }
+
+  present() {
+    // Add title row unless this.showTitle set to false
+    if (this.title && this.books.length > 0) {
+      let titleRow = new UITableRow()
+      let titleCell = titleRow.addText(this.title)
+      titleRow.height = 60
+      titleRow.backgroundColor = Color.yellow()
+      titleCell.titleFont = Font.boldSystemFont(20)
+      titleCell.titleColor = Color.white()
+      titleCell.subtitleColor = Color.white()
+      this.wall.addRow(titleRow)
+    }
+
+    // show books
+    let books = this.books
+    for (let book of books) {
+      let bookRow = new UITableRow()
+
+      if (this.formatRowFunc) {
+        this.formatRowFunc(bookRow, book)
+      } else {
+        // default row content - only title
+        let titleCell = bookRow.addText(book.title)
+        bookRow.dismissOnSelect = true
+      }
+
+      let that = this
+      if (this.onTap) { bookRow.onSelect = (idx) => { that.onTap(book) } }
+
+      this.wall.addRow(bookRow)
+    }
+
+  }
+}
+
+const tapFunctions = {
+  forBooksBeingRead: async function(book) {
+    log("--- editing book " + book.title)
+    let alert = new Alert()
+    alert.title = localeMessages.update_page
+    // !! BARDZO WAŻNE - funkcja addTextField wywala się po cichu, gdy argument nie jest typu string
+    let textField = alert.addTextField("Page", book.currentPage.toString())
+    textField.setNumberPadKeyboard()
+
+    for (let i=1; i< 6; ++i) {
+      alert.addAction((parseInt(book.currentPage)+i).toString())
+    }
+
+    alert.addAction(localeMessages.action_save)
+    alert.addAction(localeMessages.action_put_aside)
+    alert.addCancelAction(localeMessages.action_cancel)
+    let idx = await alert.presentAlert()
+    if (idx != -1) {
+      log(`Update current page with action ${idx}`)
+      let previousCurrentPage = parseInt(book.currentPage)
+
+      // check if user read some pages
+      if (idx < 6)
+        book.currentPage = (idx == 5 ? alert.textFieldValue(0) : previousCurrentPage + idx + 1)
+      // check if user decided to put book aside and remove from current shelf
+      else if (idx == 6) book.putAside = true
+
+      book.lastReadDate = new Date()
+      log("Page of book from " + previousCurrentPage + " to " + book.currentPage)
+      Book.save(BOOKS)
+    }
+  },
+  forBooksPutAside: async function(book) {
+    let alert = new Alert() 
+    alert.title = localeMessages.action_continue_reading
+    alert.addAction(localeMessages.action_yes)
+    alert.addCancelAction(localeMessages.action_cancel)
+    let idx = await alert.presentAlert()
+    if (idx != -1) {
+      book.putAside = false
+      Book.save(BOOKS)
+    }
+  },
+  forAlreadyReadBooks: function() {
+
+  }
+}
+
 
 if (config.runsInWidget) {
   const mainWidget = new ListWidget()
   mainWidget.backgroundColor = new Color("#222222")
-  let books = await Book.all()
 
-  books.forEach(book => { 
+  let top4Books = BOOKS.slice(0, 5)
+  top4Books.forEach(book => { 
     if (book.isBeingRead()) drawBookProgress(book, mainWidget) 
   });
 
   Script.setWidget(mainWidget)
-  mainWidget.presentMedium()
   Script.complete()
   
 } else if (config.runsInApp) {
 
   let uiBooksTable = initBooksTable()
 
-  // musi być await
-  let books = await Book.all()
-  let booksBeingRead = books.filter((book) => book.isBeingRead())
-  let readBooks = books.filter((book) => book.isRead())
+  let booksBeingRead = BOOKS.filter((book) => book.isBeingRead())
+  let readBooks = BOOKS.filter((book) => book.isRead())
 
-  for (book of booksBeingRead) {
-    let row = new UITableRow()
-    let titleCell = row.addText(book.title)
-    let pagesCell = row.addText(book.printPageStatus())
+  let booksBeingReadConfig =  { books: booksBeingRead, onTap: tapFunctions.forBooksBeingRead }
+  let booksBeingReadShelf = new ShelfView(uiBooksTable, booksBeingReadConfig)
+
+  booksBeingReadShelf.formatRowFunc = function(bookRow, book) {
+    let titleCell = bookRow.addText(book.title)
+    let pagesCell = bookRow.addText(book.printPageStatus())
     titleCell.widthWeight = 80
     pagesCell.widthWeight = 20
-    row.dismissOnSelect = true
-    row.onSelect = (idx) => {
-      let b = books[idx - 1]
-      let previousCurrentPage = b.currentPage
-       editBook(b, books)
-    }
-    uiBooksTable.addRow(row)
+    bookRow.dismissOnSelect = true
   }
 
-  let readBooksRow = new UITableRow()
-  let readBooksCell = readBooksRow.addText(localeMessages.read_books_list)
-  readBooksRow.height = 60
-  readBooksRow.backgroundColor = Color.yellow()
-  readBooksCell.titleFont = Font.boldSystemFont(20)
-  readBooksCell.titleColor = Color.white()
-  readBooksCell.subtitleColor = Color.white()
-  uiBooksTable.addRow(readBooksRow)
+  booksBeingReadShelf.present()
 
-  for (book of readBooks) {
-    let row = new UITableRow()
-    let titleCell = row.addText(book.title)
-    // let pagesCell = row.addText(book.printPageStatus())
-    // titleCell.widthWeight = 80
-    // pagesCell.widthWeight = 20
-    // row.dismissOnSelect = true
-    // row.onSelect = (idx) => {
-    //   let b = books[idx - 1]
-    //   let previousCurrentPage = b.currentPage
-    //    editBook(b, books)
-    // }
-    uiBooksTable.addRow(row)
-  }
+  let readBooksConfig =  { title: localeMessages.read_books_list, books: readBooks }
+  let readBooksShelf = new ShelfView(uiBooksTable, readBooksConfig)
+
+  readBooksShelf.present()
+
+  let booksPutAside = BOOKS.filter((b) => b.isPutAside())
+  let booksPutAsideConfig = { title: localeMessages.books_put_aisde_list, books: booksPutAside, onTap: tapFunctions.forBooksPutAside }
+  let putAsideBooksShelf = new ShelfView(uiBooksTable, booksPutAsideConfig)
+  putAsideBooksShelf.present()
 
   uiBooksTable.present()
-}
-
-async function editBook(book, books) {
-  log("--- editing book " + book.title)
-  let alert = new Alert()
-  alert.title = localeMessages.update_page
-  // !! BARDZO WAŻNE - funkcja addTextField wywala się po cichu, gdy argument nie jest typu string
-  let textField = alert.addTextField("Page", book.currentPage.toString())
-  textField.setNumberPadKeyboard()
-
-  for (let i=1; i< 6; ++i) {
-    alert.addAction((parseInt(book.currentPage)+i).toString())
-  }
-
-  alert.addAction(localeMessages.action_save)
-  alert.addCancelAction(localeMessages.action_cancel)
-  let idx = await alert.presentAlert()
-  if (idx != -1) {
-    log(`Update current page with action ${idx}`)
-    let previousCurrentPage = parseInt(book.currentPage)
-    book.currentPage = (idx == 5 ? alert.textFieldValue(0) : previousCurrentPage + idx + 1)
-
-    book.lastReadDate = new Date()
-    log("Page of book from " + previousCurrentPage + " to " + book.currentPage)
-    Book.save(books)
-  }
 }
 
 function initBooksTable() {
@@ -227,10 +287,15 @@ function initBooksTable() {
 }
 
 function drawBookProgress(book, mainWidget) {
-  const titlew = mainWidget.addText(book.title)
+  var bookTitle = book.title 
+  if (config.widgetFamily == "small" && bookTitle.length > 20) {
+    bookTitle = book.title.slice(0, 17) + "..."
+  }
+
+  const titlew = mainWidget.addText(bookTitle)
   titlew.textColor = new Color("#e587ce")
-  titlew.font = Font.boldSystemFont(13)
-  mainWidget.addSpacer(6)
+  titlew.font = Font.boldSystemFont(12)
+  mainWidget.addSpacer(3)
   const imgw = mainWidget.addImage(creatProgress(book.textLength, book.currentPage))
   imgw.imageSize=new Size(widget.config.width, widget.config.height)
   mainWidget.addSpacer(6)
