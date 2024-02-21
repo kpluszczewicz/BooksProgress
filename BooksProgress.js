@@ -52,23 +52,33 @@ const MESSAGES = {
     read_books_list: "Lista przeczytanych książek",
     books_put_aisde_list: "Przerwane czytanie",
     action_save: "Zapisz",
+    action_add: "Dodaj",
     action_yes: "Tak",
     action_put_aside: "Przerwij czytanie książki",
     action_continue_reading: "Wznowić czytanie?",
 
     action_cancel: "Anuluj",
-    update_page: "Podaj stronę na której skończyłeś"
+    update_page: "Podaj stronę na której skończyłeś",
+    button_add_book: "Dodaj ksiązkę do czytanych",
+    title: "Tytuł",
+    current_page: "Bieżąca strona",
+    total_pages: "Całkowita ilość stron"
   },
   "en": {
     books_list: "List of books being read",
     read_books_list: "List of books already read",
     books_put_aisde_list: "Books put aside",
     action_save: "Save",
+    action_add: "Add",
     action_yes: "Yes",
     action_put_aside: "Put book aside",
     action_continue_reading: "Continue reading?",
     action_cancel: "Cancel",
-    update_page: "Enter page you have stopped reading on"
+    update_page: "Enter page you have stopped reading on",
+    button_add_book: "Start reading new book",
+    title: "Title",
+    current_page: "Current page",
+    total_pages: "Total pages number"
   }
 }
 
@@ -92,6 +102,7 @@ class Book {
     this.startingDate = new Date(obj["startingDate"])
     this.lastReadDate = new Date(obj["lastReadDate"])
     this.putAside = obj["putAside"]
+    this.history = obj["history"] || []
   }
 
   // prints status of a book in form ie 13/233 where 13 is current page and 233 is total number of pages
@@ -107,6 +118,16 @@ class Book {
   }
   isBeingRead() {
     return !this.isPutAside() && this.currentPageInt < this.textLengthInt
+  }
+
+  addCurrentStateToHistory() {
+    // TODO
+    let currentState = {
+      lastReadDate: this.lastReadDate,
+      currentPage: this.currentPage,
+      currentPageInt: this.currentPageInt
+    };
+    this.history.push(currentState)
   }
 
   // to save any book to db file you need to save whole array, can't operate on singular books
@@ -135,27 +156,27 @@ const BOOKS = await Book.all()
 
 class ShelfView {
   constructor(wall, config) {
-    this.wall = wall
-    this.title = config.title
-    this.onTap = config.onTap
-    this.books = config.books
+    this.wall = wall;
+    this.title = config.title;
+    this.onTap = config.onTap;
+    this.books = config.books;
   }
 
   present() {
-    // Add title row unless this.showTitle set to false
+    // Add title row if property is set and there are at leas one book
     if (this.title && this.books.length > 0) {
-      let titleRow = new UITableRow()
-      let titleCell = titleRow.addText(this.title)
-      titleRow.height = 60
-      titleRow.backgroundColor = Color.yellow()
-      titleCell.titleFont = Font.boldSystemFont(20)
-      titleCell.titleColor = Color.white()
-      titleCell.subtitleColor = Color.white()
-      this.wall.addRow(titleRow)
+      let titleRow = new UITableRow();
+      let titleCell = titleRow.addText(this.title);
+      titleRow.height = 60;
+      titleRow.backgroundColor = Color.yellow();
+      titleCell.titleFont = Font.boldSystemFont(20);
+      titleCell.titleColor = Color.white();
+      titleCell.subtitleColor = Color.white();
+      this.wall.addRow(titleRow);
     }
 
     // show books
-    let books = this.books
+    let books = this.books;
     for (let book of books) {
       let bookRow = new UITableRow()
 
@@ -205,6 +226,8 @@ const tapFunctions = {
 
       book.lastReadDate = new Date()
       log("Page of book from " + previousCurrentPage + " to " + book.currentPage)
+
+      book.addCurrentStateToHistory();
       Book.save(BOOKS)
     }
   },
@@ -226,48 +249,51 @@ const tapFunctions = {
 
 
 if (config.runsInWidget) {
-  const mainWidget = new ListWidget()
-  mainWidget.backgroundColor = new Color("#222222")
+  const mainWidget = new ListWidget();
+  mainWidget.backgroundColor = new Color("#222222");
 
-  let top4Books = BOOKS.slice(0, 5)
-  top4Books.forEach(book => { 
-    if (book.isBeingRead()) drawBookProgress(book, mainWidget) 
-  });
+  let top4Books = BOOKS.filter((book) => book.isBeingRead()).slice(0, 4);
+  top4Books.forEach(book => { drawBookProgress(book, mainWidget) });
 
-  Script.setWidget(mainWidget)
-  Script.complete()
+  Script.setWidget(mainWidget);
+  Script.complete();
   
 } else if (config.runsInApp) {
 
-  let uiBooksTable = initBooksTable()
+  let uiBooksTable = initBooksTable();
 
-  let booksBeingRead = BOOKS.filter((book) => book.isBeingRead())
-  let readBooks = BOOKS.filter((book) => book.isRead())
+  let booksBeingRead = BOOKS.filter((book) => book.isBeingRead());
+  let readBooks = BOOKS.filter((book) => book.isRead());
 
-  let booksBeingReadConfig =  { books: booksBeingRead, onTap: tapFunctions.forBooksBeingRead }
-  let booksBeingReadShelf = new ShelfView(uiBooksTable, booksBeingReadConfig)
+  let booksBeingReadConfig =  { books: booksBeingRead, onTap: tapFunctions.forBooksBeingRead };
+  let booksBeingReadShelf = new ShelfView(uiBooksTable, booksBeingReadConfig);
 
   booksBeingReadShelf.formatRowFunc = function(bookRow, book) {
-    let titleCell = bookRow.addText(book.title)
-    let pagesCell = bookRow.addText(book.printPageStatus())
-    titleCell.widthWeight = 80
-    pagesCell.widthWeight = 20
-    bookRow.dismissOnSelect = true
+    let titleCell = bookRow.addText(book.title);
+    let pagesCell = bookRow.addText(book.printPageStatus());
+    titleCell.widthWeight = 80;
+    pagesCell.widthWeight = 20;
+    bookRow.dismissOnSelect = true;
   }
 
-  booksBeingReadShelf.present()
+  // TODO: Add row to add new book
 
-  let readBooksConfig =  { title: localeMessages.read_books_list, books: readBooks }
-  let readBooksShelf = new ShelfView(uiBooksTable, readBooksConfig)
+  booksBeingReadShelf.present();
 
-  readBooksShelf.present()
+  let addNewBookRow = buildAddNewBookRow();
+  uiBooksTable.addRow(addNewBookRow);
 
-  let booksPutAside = BOOKS.filter((b) => b.isPutAside())
-  let booksPutAsideConfig = { title: localeMessages.books_put_aisde_list, books: booksPutAside, onTap: tapFunctions.forBooksPutAside }
-  let putAsideBooksShelf = new ShelfView(uiBooksTable, booksPutAsideConfig)
-  putAsideBooksShelf.present()
+  let readBooksConfig =  { title: localeMessages.read_books_list, books: readBooks };
+  let readBooksShelf = new ShelfView(uiBooksTable, readBooksConfig);
 
-  uiBooksTable.present()
+  readBooksShelf.present();
+
+  let booksPutAside = BOOKS.filter((b) => b.isPutAside());
+  let booksPutAsideConfig = { title: localeMessages.books_put_aisde_list, books: booksPutAside, onTap: tapFunctions.forBooksPutAside };
+  let putAsideBooksShelf = new ShelfView(uiBooksTable, booksPutAsideConfig);
+  putAsideBooksShelf.present();
+
+  uiBooksTable.present();
 }
 
 function initBooksTable() {
@@ -284,6 +310,36 @@ function initBooksTable() {
 
   table.addRow(headerRow)
   return table
+}
+
+function buildAddNewBookRow() {
+  let row = new UITableRow()
+  let buttonCell = row.addText(localeMessages.button_add_book)
+  buttonCell.centerAligned()
+  buttonCell.titleColor = Color.blue()
+  row.dismissOnSelect = true
+
+  row.onSelect = async function(idx) {
+    let alert = new Alert()
+    alert.title = localeMessages.button_add_book
+    alert.addTextField(localeMessages.title)
+    alert.addTextField(localeMessages.current_page)
+    alert.addTextField(localeMessages.total_pages)
+    alert.addAction(localeMessages.action_save)
+    alert.addCancelAction(localeMessages.action_cancel)
+
+    let resultIndex = await alert.presentAlert()
+
+    if (resultIndex > -1) {
+      let newBook = new Book({title: alert.textFieldValue(0),
+                              currentPage: alert.textFieldValue(1),
+                              textLength: alert.textFieldValue(2) })
+      BOOKS.push(newBook)
+      Book.save(BOOKS)
+    }
+  }
+
+  return row;
 }
 
 function drawBookProgress(book, mainWidget) {
